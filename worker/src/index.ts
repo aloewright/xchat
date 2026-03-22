@@ -22,6 +22,7 @@ import { CloudflareProvider } from "@composio/cloudflare";
 // ──────────────────────────────────────────────
 
 export interface Env {
+  ASSETS: Fetcher;
   AI: Ai;
   COMPOSIO_API_KEY: string;
   CORS_ORIGIN?: string;
@@ -585,7 +586,7 @@ export default {
       });
     }
 
-    return new Response("Not Found", { status: 404, headers: cors });
+    return env.ASSETS.fetch(request);
   },
 };
 

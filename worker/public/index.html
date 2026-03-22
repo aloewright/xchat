@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>xchat – AI Chat</title>
+  <style>
+    /* ── Reset & tokens ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #0f0f10;
+      --surface:     #1a1a1e;
+      --surface2:    #26262c;
+      --border:      #2e2e36;
+      --accent:      #5865f2;
+      --accent-glow: #5865f240;
+      --text:        #e8e8ec;
+      --text-dim:    #888898;
+      --user-bg:     #5865f2;
+      --user-text:   #ffffff;
+      --tool-border: #3d5a80;
+      --tool-bg:     #0d1f2d;
+      --green:       #3fb950;
+      --red:         #f85149;
+      --yellow:      #d29922;
+      --radius-sm:   8px;
+      --radius-md:   14px;
+      --radius-lg:   20px;
+      --font-mono:   "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f4f4f7; --surface: #ffffff; --surface2: #f0f0f4;
+        --border: #d8d8e0; --text: #1a1a24; --text-dim: #666678;
+        --tool-bg: #e8f0f8; --tool-border: #a0b8d0;
+      }
+    }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    /* ── Auth overlay ────────────────────────────────────────────── */
+    #auth-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      z-index: 100;
+    }
+    #auth-overlay.hidden { display: none; }
+
+    .auth-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 40px 48px;
+      text-align: center;
+      max-width: 360px;
+      width: 90%;
+    }
+    .auth-card .brand-icon-lg {
+      width: 56px; height: 56px;
+      background: var(--accent);
+      border-radius: var(--radius-md);
+      display: grid;
+      place-items: center;
+      font-size: 28px;
+      margin: 0 auto 20px;
+    }
+    .auth-card h1 { font-size: 1.4rem; margin-bottom: 8px; }
+    .auth-card p  { color: var(--text-dim); font-size: 0.88rem; line-height: 1.6; margin-bottom: 28px; }
+
+    .btn-signin {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 12px 28px;
+      border-radius: var(--radius-sm);
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: opacity 0.15s;
+      text-decoration: none;
+    }
+    .btn-signin:hover { opacity: 0.88; }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      gap: 10px;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 1.1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-icon {
+      width: 32px; height: 32px;
+      background: var(--accent);
+      border-radius: var(--radius-sm);
+      display: grid;
+      place-items: center;
+      font-size: 16px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-ghost {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 0.82rem;
+      transition: all 0.15s;
+    }
+    .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+
+    #status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: background 0.3s;
+      flex-shrink: 0;
+    }
+    #status-dot.connected { background: var(--green); }
+    #status-dot.error     { background: var(--red);   }
+
+    /* ── Settings panel ─────────────────────────────────────────── */
+    #settings-panel {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    #settings-panel.open { display: flex; }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .settings-label {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      width: 90px;
+      flex-shrink: 0;
+    }
+
+    .settings-input {
+      flex: 1;
+      min-width: 200px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem;
+      font-family: var(--font-mono);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .settings-input:focus { border-color: var(--accent); }
+
+    .btn-primary {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      padding: 7px 16px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: opacity 0.15s;
+    }
+    .btn-primary:hover { opacity: 0.88; }
+
+    /* ── Message list ───────────────────────────────────────────── */
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      scroll-behavior: smooth;
+    }
+
+    #messages::-webkit-scrollbar { width: 6px; }
+    #messages::-webkit-scrollbar-track { background: transparent; }
+    #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── Welcome state ──────────────────────────────────────────── */
+    #welcome {
+      margin: auto;
+      text-align: center;
+      max-width: 420px;
+      padding: 32px 16px;
+    }
+
+    #welcome .welcome-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    #welcome h2 { font-size: 1.4rem; margin-bottom: 8px; }
+    #welcome p  { color: var(--text-dim); font-size: 0.9rem; line-height: 1.6; margin-bottom: 20px; }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+    }
+
+    .chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .chip:hover { border-color: var(--accent); background: var(--accent-glow); }
+
+    /* ── Message row ────────────────────────────────────────────── */
+    .message-row {
+      display: flex;
+      flex-direction: column;
+      max-width: 70%;
+      animation: fadein 0.2s ease;
+    }
+    .message-row.user   { align-self: flex-end; align-items: flex-end; }
+    .message-row.assistant { align-self: flex-start; align-items: flex-start; }
+    .message-row.system {
+      align-self: center;
+      align-items: center;
+      max-width: 90%;
+    }
+
+    @keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    .bubble {
+      padding: 10px 14px;
+      border-radius: var(--radius-lg);
+      line-height: 1.55;
+      word-break: break-word;
+      white-space: pre-wrap;
+      font-size: 0.92rem;
+    }
+
+    .bubble.user {
+      background: var(--user-bg);
+      color: var(--user-text);
+      border-bottom-right-radius: 5px;
+    }
+
+    .bubble.assistant {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 5px;
+    }
+
+    .bubble.system {
+      background: var(--surface2);
+      color: var(--text-dim);
+      font-size: 0.8rem;
+      border-radius: 12px;
+      padding: 6px 14px;
+    }
+
+    .bubble.streaming::after {
+      content: "▋";
+      display: inline-block;
+      animation: blink 0.85s steps(2, start) infinite;
+      color: var(--accent);
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .msg-time {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-top: 3px;
+      padding: 0 4px;
+    }
+
+    /* ── Tool call cards ────────────────────────────────────────── */
+    .tool-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 6px;
+      align-self: flex-start;
+      max-width: 100%;
+    }
+
+    .tool-card {
+      background: var(--tool-bg);
+      border: 1px solid var(--tool-border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      max-width: 400px;
+      font-size: 0.82rem;
+      animation: fadein 0.2s ease;
+    }
+
+    .tool-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      user-select: none;
+      background: transparent;
+      border: none;
+      width: 100%;
+      color: var(--text);
+      text-align: left;
+      transition: background 0.1s;
+    }
+    .tool-card-header:hover { background: rgba(255,255,255,0.04); }
+
+    .tool-status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .tool-status-dot.pending  { background: var(--text-dim); }
+    .tool-status-dot.running  { background: var(--yellow); animation: pulse 1s infinite; }
+    .tool-status-dot.done     { background: var(--green); }
+    .tool-status-dot.failed   { background: var(--red); }
+
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+    .tool-name {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: 0.78rem;
+      flex: 1;
+    }
+    .tool-chevron { color: var(--text-dim); font-size: 0.7rem; }
+
+    .tool-card-body {
+      border-top: 1px solid var(--tool-border);
+      padding: 10px 12px;
+      display: none;
+    }
+    .tool-card-body.open { display: block; }
+
+    .tool-section-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+
+    .tool-code {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      background: var(--surface2);
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      overflow-x: auto;
+      white-space: pre;
+      max-height: 120px;
+      margin-bottom: 8px;
+    }
+
+    /* ── Input area ─────────────────────────────────────────────── */
+    #input-area {
+      padding: 12px 16px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 8px 8px 8px 16px;
+      transition: border-color 0.15s;
+    }
+    .input-row:focus-within { border-color: var(--accent); }
+
+    #input {
+      flex: 1;
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 0.93rem;
+      resize: none;
+      outline: none;
+      line-height: 1.5;
+      max-height: 120px;
+      font-family: inherit;
+    }
+    #input::placeholder { color: var(--text-dim); }
+
+    #send-btn {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      width: 34px; height: 34px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      transition: background 0.15s, opacity 0.15s;
+      align-self: flex-end;
+    }
+    #send-btn:disabled { background: var(--border); cursor: not-allowed; }
+    #send-btn:hover:not(:disabled) { opacity: 0.85; }
+
+    #send-btn svg { width: 16px; height: 16px; }
+
+    #stop-btn {
+      display: none;
+      background: var(--red);
+      border: none;
+      color: #fff;
+      width: 34px; height: 34px;
+      border-radius: 50%;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      align-self: flex-end;
+    }
+    #stop-btn.visible { display: grid; }
+
+    @media (max-width: 600px) {
+      .message-row { max-width: 90%; }
+      .tool-card   { max-width: 280px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Auth overlay — shown when no token is present -->
+<div id="auth-overlay" class="hidden">
+  <div class="auth-card">
+    <div class="brand-icon-lg">💬</div>
+    <h1>Welcome to xchat</h1>
+    <p>Sign in to start chatting with an AI assistant powered by Cloudflare Workers AI.</p>
+    <a class="btn-signin" href="/auth/login">Sign in with Kinde</a>
+  </div>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="header-brand">
+    <div class="brand-icon">💬</div>
+    xchat
+  </div>
+  <div class="header-actions">
+    <div id="status-dot" title="Worker connection status"></div>
+    <button class="btn-ghost" onclick="clearChat()">Clear</button>
+    <button class="btn-ghost" onclick="toggleSettings()">⚙ Settings</button>
+    <button class="btn-ghost" id="signout-btn" onclick="signOut()" title="Sign out" style="display:none;">Sign Out</button>
+  </div>
+</header>
+
+<!-- Settings panel -->
+<div id="settings-panel">
+  <div class="settings-row">
+    <span class="settings-label">Worker URL</span>
+    <input id="worker-url" class="settings-input"
+      type="url" placeholder="https://xchat-worker.YOUR_SUB.workers.dev"
+      value="" />
+  </div>
+  <div class="settings-row">
+    <span class="settings-label">User ID</span>
+    <input id="user-id" class="settings-input" type="text" placeholder="default" value="default" />
+  </div>
+  <div class="settings-row">
+    <span class="settings-label">Toolkits</span>
+    <input id="toolkits" class="settings-input" type="text"
+      placeholder="hackernews, gmail, github …" value="hackernews" />
+  </div>
+  <div class="settings-row">
+    <span class="settings-label">Rube Tools</span>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;">
+      <input id="rube-toggle" type="checkbox" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;" />
+      Enable Rube MCP tools
+    </label>
+    <span style="font-size:0.75rem;color:var(--text-dim);">Requires RUBE_ENABLED=true on the worker</span>
+  </div>
+  <div class="settings-row">
+    <button class="btn-primary" onclick="saveSettings()">Save &amp; Test</button>
+    <span id="test-result" style="font-size:0.8rem;color:var(--text-dim)"></span>
+  </div>
+</div>
+
+<!-- Messages -->
+<div id="messages">
+  <div id="welcome">
+    <span class="welcome-icon">🤖</span>
+    <h2>Welcome to xchat</h2>
+    <p>
+      An AI chat app powered by <strong>Cloudflare Workers AI</strong>
+      and <strong>Composio</strong> tool use.<br/>
+      Set your worker URL in ⚙ Settings, then start chatting.
+    </p>
+    <div class="chips">
+      <button class="chip" onclick="sendSuggestion(this)">Top HN stories today</button>
+      <button class="chip" onclick="sendSuggestion(this)">Tell me about the HN user pg</button>
+      <button class="chip" onclick="sendSuggestion(this)">Latest Ask HN posts</button>
+      <button class="chip" onclick="sendSuggestion(this)">What is Composio?</button>
+    </div>
+  </div>
+</div>
+
+<!-- Input -->
+<div id="input-area">
+  <div class="input-row">
+    <textarea id="input" rows="1" placeholder="Message xchat…"></textarea>
+    <button id="stop-btn" onclick="stopStream()" title="Stop generation">
+      <svg viewBox="0 0 16 16" fill="currentColor">
+        <rect x="3" y="3" width="10" height="10" rx="2"/>
+      </svg>
+    </button>
+    <button id="send-btn" onclick="sendMessage()" title="Send (Enter)" disabled>
+      <svg viewBox="0 0 16 16" fill="currentColor">
+        <path d="M2 14L14 8 2 2v5l9 1-9 1z"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script>
+// ── Auth ──────────────────────────────────────────────────────────────────────
+const AUTH_TOKEN_KEY = 'kinde_token';
+
+function getToken() {
+  return sessionStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function setToken(token) {
+  sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+function clearToken() {
+  sessionStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+function showAuthOverlay() {
+  document.getElementById('auth-overlay').classList.remove('hidden');
+  document.getElementById('signout-btn').style.display = 'none';
+}
+
+function hideAuthOverlay() {
+  document.getElementById('auth-overlay').classList.add('hidden');
+  document.getElementById('signout-btn').style.display = '';
+}
+
+function signOut() {
+  clearToken();
+  showAuthOverlay();
+  window.location.href = '/auth/logout';
+}
+
+/**
+ * Handle the OAuth callback: exchange the code for a token, store it,
+ * then redirect to the root so the chat UI loads clean.
+ */
+async function handleAuthCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code   = params.get('code');
+  const state  = params.get('state');
+  if (!code) { showAuthOverlay(); return; }
+
+  try {
+    const callbackUrl = new URL('/auth/callback', window.location.origin);
+    callbackUrl.searchParams.set('code', code);
+    if (state) callbackUrl.searchParams.set('state', state);
+
+    const resp = await fetch(callbackUrl.toString(), { credentials: 'include' });
+    if (!resp.ok) throw new Error(`Callback failed: HTTP ${resp.status}`);
+
+    const data = await resp.json();
+    if (!data.access_token) throw new Error('No access_token in response');
+
+    setToken(data.access_token);
+    // Redirect to root, stripping the callback params from the URL
+    window.location.replace('/');
+  } catch (err) {
+    console.error('Auth callback error:', err);
+    showAuthOverlay();
+  }
+}
+
+// ── Bootstrap auth on page load ───────────────────────────────────────────────
+(function initAuth() {
+  const path = window.location.pathname;
+
+  // If we're on the callback URL, handle the OAuth return
+  if (path === '/callback' || path.endsWith('/callback')) {
+    handleAuthCallback();
+    return;
+  }
+
+  // Otherwise check for a stored token
+  if (getToken()) {
+    hideAuthOverlay();
+  } else {
+    showAuthOverlay();
+  }
+})();
+
+// ── Config ────────────────────────────────────────────────────────────────────
+let config = {
+  workerUrl:   localStorage.getItem('workerUrl')   || '',
+  userId:      localStorage.getItem('userId')      || 'default',
+  toolkits:    localStorage.getItem('toolkits')    || 'hackernews',
+  rubeEnabled: localStorage.getItem('rubeEnabled') === 'true',
+};
+
+// Populate settings on load
+document.getElementById('worker-url').value      = config.workerUrl;
+document.getElementById('user-id').value         = config.userId;
+document.getElementById('toolkits').value        = config.toolkits;
+document.getElementById('rube-toggle').checked   = config.rubeEnabled;
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let messages = [];       // { role, content }
+let isLoading = false;
+let abortController = null;
+
+// ── DOM helpers ───────────────────────────────────────────────────────────────
+const $messages = document.getElementById('messages');
+const $input    = document.getElementById('input');
+const $send     = document.getElementById('send-btn');
+const $stop     = document.getElementById('stop-btn');
+const $welcome  = document.getElementById('welcome');
+
+function toggleSettings() {
+  document.getElementById('settings-panel').classList.toggle('open');
+}
+
+function saveSettings() {
+  config.workerUrl   = document.getElementById('worker-url').value.trim();
+  config.userId      = document.getElementById('user-id').value.trim() || 'default';
+  config.toolkits    = document.getElementById('toolkits').value.trim() || 'hackernews';
+  config.rubeEnabled = document.getElementById('rube-toggle').checked;
+  localStorage.setItem('workerUrl',   config.workerUrl);
+  localStorage.setItem('userId',      config.userId);
+  localStorage.setItem('toolkits',    config.toolkits);
+  localStorage.setItem('rubeEnabled', config.rubeEnabled);
+
+  const $result = document.getElementById('test-result');
+  $result.textContent = 'Testing…';
+  fetch(config.workerUrl + '/health')
+    .then(r => r.ok
+      ? ($result.style.color = 'var(--green)',  $result.textContent = '✓ Worker reachable')
+      : ($result.style.color = 'var(--red)',    $result.textContent = '✗ HTTP ' + r.status))
+    .catch(() => ($result.style.color = 'var(--red)', $result.textContent = '✗ Unreachable'));
+}
+
+// ── Input auto-resize ─────────────────────────────────────────────────────────
+$input.addEventListener('input', () => {
+  $input.style.height = 'auto';
+  $input.style.height = Math.min($input.scrollHeight, 120) + 'px';
+  $send.disabled = !$input.value.trim() || isLoading;
+});
+
+$input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    if (!$send.disabled) sendMessage();
+  }
+});
+
+// ── Chat functions ────────────────────────────────────────────────────────────
+function sendSuggestion(btn) {
+  $input.value = btn.textContent.trim();
+  $input.dispatchEvent(new Event('input'));
+  sendMessage();
+}
+
+async function sendMessage() {
+  const text = $input.value.trim();
+  if (!text || isLoading) return;
+  if (!config.workerUrl) { alert('Set the Worker URL in Settings first.'); toggleSettings(); return; }
+
+  $input.value = '';
+  $input.style.height = 'auto';
+  $send.disabled = true;
+
+  // Hide welcome card
+  $welcome && $welcome.remove();
+
+  // Append user bubble
+  messages.push({ role: 'user', content: text });
+  appendBubble('user', text);
+
+  // Start assistant bubble
+  const assistantRow = appendBubble('assistant', '', { streaming: true });
+  const bubble       = assistantRow.querySelector('.bubble');
+  const toolCardsEl  = assistantRow.querySelector('.tool-cards');
+
+  setLoading(true);
+
+  abortController = new AbortController();
+
+  try {
+    const token = getToken();
+    const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const res = await fetch(config.workerUrl + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({
+        messages:    messages.filter(m => m.role === 'user' || m.role === 'assistant'),
+        userId:      config.userId,
+        toolkits:    config.toolkits.split(',').map(s => s.trim()).filter(Boolean),
+        rubeEnabled: config.rubeEnabled,
+      }),
+      signal: abortController.signal,
+    });
+
+    if (res.status === 401) {
+      // Token expired or invalid — clear it and show the sign-in screen
+      clearToken();
+      showAuthOverlay();
+      bubble.classList.remove('streaming');
+      bubble.textContent = 'Session expired. Please sign in again.';
+      setLoading(false);
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let eventName = 'message';
+    let finalText = '';
+    const toolCallMap = {};   // name → { card, dotEl, bodyEl }
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop() ?? '';
+
+      for (const part of parts) {
+        let localEvent = 'message';
+        let localData  = '';
+        for (const line of part.split('\n')) {
+          if (line.startsWith('event:')) localEvent = line.slice(6).trim();
+          else if (line.startsWith('data:')) localData = line.slice(5).trim();
+        }
+
+        if (!localData) continue;
+        let payload;
+        try { payload = JSON.parse(localData); } catch { continue; }
+
+        if (localEvent === 'token') {
+          finalText += payload.content ?? '';
+          bubble.textContent = finalText;
+          scrollToBottom();
+
+        } else if (localEvent === 'tool_call') {
+          const tc = addToolCard(toolCardsEl, payload.name, payload.arguments);
+          toolCallMap[payload.name] = tc;
+
+        } else if (localEvent === 'tool_result') {
+          const tc = toolCallMap[payload.name];
+          if (tc) resolveToolCard(tc, payload.result);
+
+        } else if (localEvent === 'warning') {
+          appendBubble('system', '⚠️ ' + (payload.message ?? ''));
+
+        } else if (localEvent === 'done') {
+          break;
+
+        } else if (localEvent === 'error') {
+          bubble.textContent = 'Error: ' + (payload.message ?? 'Unknown error');
+          break;
+        }
+      }
+    }
+
+    bubble.classList.remove('streaming');
+    messages.push({ role: 'assistant', content: finalText });
+    setTimestamp(assistantRow);
+
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      bubble.classList.remove('streaming');
+      bubble.textContent = 'Connection failed: ' + err.message;
+    }
+  }
+
+  setLoading(false);
+}
+
+function stopStream() {
+  abortController?.abort();
+  setLoading(false);
+}
+
+function clearChat() {
+  stopStream();
+  messages = [];
+  $messages.innerHTML = '';
+  // Re-inject welcome
+  const w = document.createElement('div');
+  w.id = 'welcome';
+  w.innerHTML = `
+    <span class="welcome-icon">🤖</span>
+    <h2>Welcome to xchat</h2>
+    <p>An AI chat app powered by <strong>Cloudflare Workers AI</strong>
+       and <strong>Composio</strong> tool use.</p>
+    <div class="chips">
+      <button class="chip" onclick="sendSuggestion(this)">Top HN stories today</button>
+      <button class="chip" onclick="sendSuggestion(this)">Tell me about the HN user pg</button>
+    </div>`;
+  $messages.appendChild(w);
+}
+
+// ── Rendering helpers ─────────────────────────────────────────────────────────
+function appendBubble(role, content, opts = {}) {
+  const row = document.createElement('div');
+  row.className = `message-row ${role}`;
+
+  if (role === 'assistant') {
+    const toolCards = document.createElement('div');
+    toolCards.className = 'tool-cards';
+    row.appendChild(toolCards);
+  }
+
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${role}`;
+  if (opts.streaming) bubble.classList.add('streaming');
+  bubble.textContent = content;
+  row.appendChild(bubble);
+
+  const time = document.createElement('div');
+  time.className = 'msg-time';
+  time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  row.appendChild(time);
+
+  $messages.appendChild(row);
+  scrollToBottom();
+  return row;
+}
+
+function setTimestamp(row) {
+  const t = row.querySelector('.msg-time');
+  if (t) t.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function addToolCard(container, name, args) {
+  const card = document.createElement('div');
+  card.className = 'tool-card';
+
+  const dot = document.createElement('span');
+  dot.className = 'tool-status-dot running';
+
+  const header = document.createElement('button');
+  header.className = 'tool-card-header';
+  header.innerHTML = '';
+  header.appendChild(dot);
+
+  const nameEl = document.createElement('span');
+  nameEl.className = 'tool-name';
+  nameEl.textContent = name;
+  header.appendChild(nameEl);
+
+  const chevron = document.createElement('span');
+  chevron.className = 'tool-chevron';
+  chevron.textContent = '▼';
+  header.appendChild(chevron);
+
+  const body = document.createElement('div');
+  body.className = 'tool-card-body';
+
+  const argsLabel = document.createElement('div');
+  argsLabel.className = 'tool-section-label';
+  argsLabel.textContent = 'Arguments';
+
+  const argsCode = document.createElement('pre');
+  argsCode.className = 'tool-code';
+  argsCode.textContent = JSON.stringify(args, null, 2);
+
+  body.appendChild(argsLabel);
+  body.appendChild(argsCode);
+
+  header.addEventListener('click', () => {
+    body.classList.toggle('open');
+    chevron.textContent = body.classList.contains('open') ? '▲' : '▼';
+  });
+
+  card.appendChild(header);
+  card.appendChild(body);
+  container.appendChild(card);
+  scrollToBottom();
+
+  return { card, dot, body };
+}
+
+function resolveToolCard({ dot, body }, result) {
+  dot.className = 'tool-status-dot done';
+
+  const resLabel = document.createElement('div');
+  resLabel.className = 'tool-section-label';
+  resLabel.textContent = 'Result';
+
+  const resCode = document.createElement('pre');
+  resCode.className = 'tool-code';
+  resCode.textContent = typeof result === 'string'
+    ? result
+    : JSON.stringify(result, null, 2);
+
+  body.appendChild(resLabel);
+  body.appendChild(resCode);
+}
+
+function setLoading(val) {
+  isLoading = val;
+  $send.disabled = val || !$input.value.trim();
+  $stop.classList.toggle('visible', val);
+  updateStatusDot();
+}
+
+function scrollToBottom() {
+  $messages.scrollTop = $messages.scrollHeight;
+}
+
+// ── Connection health dot ─────────────────────────────────────────────────────
+async function updateStatusDot() {
+  const dot = document.getElementById('status-dot');
+  if (!config.workerUrl) { dot.className = ''; return; }
+  if (isLoading) { dot.className = 'connected'; return; }
+  try {
+    const r = await fetch(config.workerUrl + '/health', { signal: AbortSignal.timeout(4000) });
+    dot.className = r.ok ? 'connected' : 'error';
+  } catch {
+    dot.className = 'error';
+  }
+}
+
+// Check health on load and every 30s
+if (config.workerUrl) updateStatusDot();
+setInterval(updateStatusDot, 30_000);
+</script>
+</body>
+</html>
