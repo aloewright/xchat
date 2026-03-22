@@ -12,21 +12,100 @@ struct ChatView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                messageList
-                Divider()
-                inputBar
-            }
-            .navigationTitle("xchat")
+            ZStack {
+                // ── Main chat interface ──────────────────────────────────────
+                VStack(spacing: 0) {
+                    messageList
+                    Divider()
+                    inputBar
+                }
+                .navigationTitle("xchat")
 #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
+                .navigationBarTitleDisplayMode(.inline)
 #endif
-            .toolbar { toolbarContent }
-            .sheet(isPresented: $showSettings) {
-                SettingsView(viewModel: viewModel)
+                .toolbar { toolbarContent }
+                .sheet(isPresented: $showSettings) {
+                    SettingsView(viewModel: viewModel)
+                }
+
+                // ── Sign-in overlay ──────────────────────────────────────────
+                // Covers the chat UI whenever the user is not authenticated.
+                switch viewModel.authState {
+                case .unauthenticated:
+                    signInOverlay
+                case .authenticating:
+                    authProgressOverlay
+                case .authenticated:
+                    EmptyView()
+                }
             }
         }
     }
+
+    // MARK: Sign-in overlay
+
+    private var signInOverlay: some View {
+        ZStack {
+            Color(uiOrNSColorBackground)
+                .ignoresSafeArea()
+
+            VStack(spacing: 28) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.tint)
+
+                VStack(spacing: 10) {
+                    Text("Welcome to xchat")
+                        .font(.title2.bold())
+                    Text("Sign in to start chatting with an AI assistant powered by Cloudflare Workers AI.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: 320)
+
+                Button {
+                    viewModel.login()
+                } label: {
+                    Label("Sign in with Kinde", systemImage: "arrow.right.circle.fill")
+                        .font(.headline)
+                        .frame(minWidth: 220)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                if let err = viewModel.errorMessage {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 280)
+                }
+            }
+            .padding(40)
+        }
+    }
+
+    private var authProgressOverlay: some View {
+        ZStack {
+            Color(uiOrNSColorBackground)
+                .ignoresSafeArea()
+            VStack(spacing: 16) {
+                ProgressView()
+                    .controlSize(.large)
+                Text("Signing in…")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // Cross-platform background color helper
+#if os(macOS)
+    private var uiOrNSColorBackground: NSColor { .windowBackgroundColor }
+#else
+    private var uiOrNSColorBackground: UIColor { .systemBackground }
+#endif
 
     // MARK: Message list
 
@@ -174,6 +253,17 @@ struct ChatView: View {
                 showSettings = true
             } label: {
                 Label("Settings", systemImage: "gear")
+            }
+        }
+
+        // Sign Out — only shown when authenticated
+        if case .authenticated = viewModel.authState {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    viewModel.logout()
+                } label: {
+                    Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                }
             }
         }
     }

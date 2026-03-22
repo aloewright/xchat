@@ -20,6 +20,9 @@ final class ChatViewModel {
     var selectedToolkits: [String] = ChatConfiguration.default.toolkits
     var rubeEnabled: Bool = ChatConfiguration.default.rubeEnabled
 
+    /// Mirrors `AuthService.shared.state`; updated by `syncAuthState()`.
+    var authState: AuthState = .unauthenticated
+
     // ── Available toolkits (shown in settings) ────────────────────────────────
     let availableToolkits = [
         "hackernews", "gmail", "googlecalendar", "github",
@@ -34,9 +37,35 @@ final class ChatViewModel {
 
     init() {
         self.chatService = ChatService()
+        // Restore auth state from Keychain (AuthService reads it during init).
+        Task { await syncAuthState() }
     }
 
-    // MARK: Public actions
+    // MARK: Auth actions
+
+    /// Initiates the Kinde PKCE sign-in flow.
+    func login() {
+        Task {
+            authState = .authenticating
+            do {
+                try await AuthService.shared.login()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            await syncAuthState()
+        }
+    }
+
+    /// Signs the user out and clears the Keychain token.
+    func logout() {
+        Task {
+            await AuthService.shared.logout()
+            await syncAuthState()
+            clearConversation()
+        }
+    }
+
+    // MARK: Public chat actions
 
     /// Send the current `inputText` as a user message.
     func sendMessage() {
@@ -88,7 +117,23 @@ final class ChatViewModel {
 
     // MARK: Private
 
+    /// Pulls the latest auth state from the AuthService actor.
+    private func syncAuthState() async {
+        authState = await AuthService.shared.state
+    }
+
     private func startStream() {
+        // Block streaming when the user is not signed in.
+        guard case .authenticated = authState else {
+            errorMessage = "Please sign in to start chatting."
+            // Remove the placeholder user message we just added
+            if messages.last?.role == .user {
+                messages.removeLast()
+            }
+            isLoading = false
+            return
+        }
+
         isLoading = true
 
         // Add placeholder assistant message for streaming

@@ -5,9 +5,13 @@
  *   - Cloudflare Workers AI   (@cf/meta/llama-3.1-8b-instruct)
  *   - Composio (@composio/core + @composio/cloudflare) for tool use
  *   - Rube MCP (https://rube.app/mcp) as a second tool provider
+ *   - Kinde authentication (PKCE / OAuth 2.0 + JWKS JWT verification)
  *
- * POST /chat  → SSE stream with token / tool_call / tool_result / done / error events
- * GET  /health → JSON status
+ * POST /chat              → SSE stream (requires valid Bearer token)
+ * GET  /health            → JSON status
+ * GET  /auth/login        → Redirects to Kinde auth with PKCE
+ * GET  /auth/callback     → Exchanges code for tokens, returns JSON
+ * GET  /auth/logout       → Redirects to Kinde logout
  */
 
 import { Composio } from "@composio/core";
@@ -23,9 +27,13 @@ export interface Env {
   CORS_ORIGIN?: string;
   MODEL?: string;
   // Rube MCP
-  RUBE_MCP_URL?: string;   // defaults to https://rube.app/mcp
-  RUBE_API_TOKEN?: string; // Bearer token for Rube
-  RUBE_ENABLED?: string;   // "true" / "false" — flip without redeploying
+  RUBE_MCP_URL?: string;    // defaults to https://rube.app/mcp
+  RUBE_API_TOKEN?: string;  // Bearer token for Rube
+  RUBE_ENABLED?: string;    // "true" / "false" — flip without redeploying
+  // Kinde auth (KINDE_CLIENT_SECRET must be set via `wrangler secret put`)
+  KINDE_DOMAIN: string;
+  KINDE_CLIENT_ID: string;
+  KINDE_CLIENT_SECRET: string;
 }
 
 interface ChatMessage {
@@ -40,7 +48,7 @@ interface ChatRequest {
   userId?: string;
   model?: string;
   toolkits?: string[];
-  rubeEnabled?: boolean; // client-side toggle sent in the request body
+  rubeEnabled?: boolean;
 }
 
 type SSEEventName =
@@ -103,6 +111,7 @@ const DEFAULT_USER_ID = "default";
 const MAX_TOOL_ITERATIONS = 6;
 const DEFAULT_TOOLKITS = ["hackernews"];
 const DEFAULT_RUBE_URL = "https://rube.app/mcp";
+const REDIRECT_URI = "https://alex.chat/callback";
 
 // ──────────────────────────────────────────────
 // SSE helpers
@@ -126,6 +135,107 @@ function corsHeaders(origin: string): Record<string, string> {
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
   };
+}
+
+// ──────────────────────────────────────────────
+// Kinde auth helpers
+// ──────────────────────────────────────────────
+
+// Module-level JWKS cache — survives across requests within the same isolate.
+let jwksCache: { keys: JsonWebKeyWithKid[] } | null = null;
+
+async function getJwks(domain: string): Promise<{ keys: JsonWebKeyWithKid[] }> {
+  if (jwksCache) return jwksCache;
+  const resp = await fetch(`${domain}/.well-known/jwks`);
+  if (!resp.ok) throw new Error(`JWKS fetch failed: ${resp.status}`);
+  jwksCache = (await resp.json()) as { keys: JsonWebKeyWithKid[] };
+  return jwksCache;
+}
+
+/** Verify a Kinde RS256 JWT against the domain's JWKS. Returns true if valid. */
+async function verifyJwt(token: string, domain: string): Promise<boolean> {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+
+    const header = JSON.parse(base64urlToString(parts[0])) as {
+      kid?: string;
+      alg?: string;
+    };
+    if (header.alg !== "RS256") return false;
+
+    const jwks = await getJwks(domain);
+    const jwk = jwks.keys.find((k) => k.kid === header.kid);
+    if (!jwk) return false;
+
+    const cryptoKey = await crypto.subtle.importKey(
+      "jwk",
+      jwk,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+
+    const signingInput = encoder.encode(`${parts[0]}.${parts[1]}`);
+    const signature = base64urlToBytes(parts[2]);
+
+    return await crypto.subtle.verify(
+      "RSASSA-PKCS1-v1_5",
+      cryptoKey,
+      signature,
+      signingInput
+    );
+  } catch {
+    return false;
+  }
+}
+
+// ── Base64url helpers ────────────────────────────────────────────────────────
+
+function base64urlToString(s: string): string {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = b64 + "==".slice(0, (4 - (b64.length % 4)) % 4);
+  return atob(padded);
+}
+
+function base64urlToBytes(s: string): Uint8Array {
+  const binary = base64urlToString(s);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function base64urlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+// ── PKCE helpers ─────────────────────────────────────────────────────────────
+
+async function generatePkce(): Promise<{
+  codeVerifier: string;
+  codeChallenge: string;
+}> {
+  const random = crypto.getRandomValues(new Uint8Array(32));
+  const codeVerifier = base64urlEncode(random);
+  const hashBuffer = await crypto.subtle.digest(
+    "SHA-256",
+    encoder.encode(codeVerifier)
+  );
+  const codeChallenge = base64urlEncode(new Uint8Array(hashBuffer));
+  return { codeVerifier, codeChallenge };
+}
+
+function generateState(): string {
+  return base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+}
+
+function getCookie(cookieHeader: string, name: string): string | null {
+  const match = cookieHeader.match(
+    new RegExp(`(?:^|;\\s*)${name}=([^;]*)`)
+  );
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 // ──────────────────────────────────────────────
@@ -204,10 +314,8 @@ async function rubeMcpPost(
 
 /**
  * Run the MCP initialize + tools/list handshake and return the tool list.
- * Each HTTP call to the Rube endpoint is independent (stateless transport).
  */
 async function fetchRubeTools(url: string, token: string): Promise<McpTool[]> {
-  // Step 1: initialize
   await rubeMcpPost(url, token, {
     jsonrpc: "2.0",
     id: 1,
@@ -219,7 +327,6 @@ async function fetchRubeTools(url: string, token: string): Promise<McpTool[]> {
     },
   });
 
-  // Step 2: list tools
   const listResp = await rubeMcpPost(url, token, {
     jsonrpc: "2.0",
     id: 2,
@@ -237,7 +344,6 @@ async function fetchRubeTools(url: string, token: string): Promise<McpTool[]> {
 
 /**
  * Execute a single Rube tool via MCP tools/call.
- * Re-initializes the session (HTTP stateless) before each call.
  */
 async function executeRubeTool(
   url: string,
@@ -245,7 +351,6 @@ async function executeRubeTool(
   name: string,
   args: unknown
 ): Promise<string> {
-  // Re-initialize (streamable HTTP transport is stateless per-request)
   await rubeMcpPost(url, token, {
     jsonrpc: "2.0",
     id: 1,
@@ -311,8 +416,133 @@ export default {
       );
     }
 
+    // ── GET /auth/login ──────────────────────
+    // Generates a PKCE pair, stores code_verifier in an httpOnly cookie,
+    // and redirects the browser to the Kinde authorization endpoint.
+    if (url.pathname === "/auth/login" && request.method === "GET") {
+      const { codeVerifier, codeChallenge } = await generatePkce();
+      const state = generateState();
+
+      const authUrl = new URL(`${env.KINDE_DOMAIN}/oauth2/auth`);
+      authUrl.searchParams.set("response_type", "code");
+      authUrl.searchParams.set("client_id", env.KINDE_CLIENT_ID);
+      authUrl.searchParams.set("redirect_uri", REDIRECT_URI);
+      authUrl.searchParams.set("scope", "openid profile email");
+      authUrl.searchParams.set("state", state);
+      authUrl.searchParams.set("code_challenge", codeChallenge);
+      authUrl.searchParams.set("code_challenge_method", "S256");
+
+      const cookieOpts = "HttpOnly; Secure; SameSite=Lax; Max-Age=600; Path=/";
+      const headers = new Headers(cors);
+      headers.set("Location", authUrl.toString());
+      headers.append(
+        "Set-Cookie",
+        `kinde_pkce=${encodeURIComponent(codeVerifier)}; ${cookieOpts}`
+      );
+      headers.append(
+        "Set-Cookie",
+        `kinde_state=${encodeURIComponent(state)}; ${cookieOpts}`
+      );
+
+      return new Response(null, { status: 302, headers });
+    }
+
+    // ── GET /auth/callback ───────────────────
+    // Receives ?code= (and optional ?state=) from Kinde, reads the
+    // code_verifier from cookie (web) or query param (native apps),
+    // exchanges the code at Kinde's token endpoint, and returns token JSON.
+    if (url.pathname === "/auth/callback" && request.method === "GET") {
+      const code = url.searchParams.get("code");
+      if (!code) {
+        return new Response(
+          JSON.stringify({ error: "missing_code" }),
+          { status: 400, headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Accept code_verifier from cookie (web PKCE flow) or query param (native)
+      const cookieHeader = request.headers.get("Cookie") ?? "";
+      const codeVerifier =
+        url.searchParams.get("code_verifier") ??
+        getCookie(cookieHeader, "kinde_pkce");
+
+      const state = url.searchParams.get("state");
+      const savedState = getCookie(cookieHeader, "kinde_state");
+      if (state && savedState && state !== savedState) {
+        return new Response(
+          JSON.stringify({ error: "state_mismatch" }),
+          { status: 400, headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
+
+      const tokenParams: Record<string, string> = {
+        grant_type: "authorization_code",
+        code,
+        client_id: env.KINDE_CLIENT_ID,
+        client_secret: env.KINDE_CLIENT_SECRET,
+        redirect_uri: REDIRECT_URI,
+      };
+      if (codeVerifier) tokenParams["code_verifier"] = codeVerifier;
+
+      const tokenResp = await fetch(`${env.KINDE_DOMAIN}/oauth2/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(tokenParams),
+      });
+
+      if (!tokenResp.ok) {
+        const errText = await tokenResp.text().catch(() => "");
+        return new Response(
+          JSON.stringify({ error: "token_exchange_failed", detail: errText.slice(0, 200) }),
+          { status: 502, headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
+
+      const tokenData = await tokenResp.json();
+
+      // Clear the PKCE cookies now that they've been used
+      const clearCookie =
+        "HttpOnly; Secure; SameSite=Lax; Max-Age=0; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+      const respHeaders = new Headers({ ...cors, "Content-Type": "application/json" });
+      respHeaders.append("Set-Cookie", `kinde_pkce=; ${clearCookie}`);
+      respHeaders.append("Set-Cookie", `kinde_state=; ${clearCookie}`);
+
+      return new Response(JSON.stringify(tokenData), {
+        status: 200,
+        headers: respHeaders,
+      });
+    }
+
+    // ── GET /auth/logout ─────────────────────
+    // Redirects to Kinde's logout endpoint.
+    if (url.pathname === "/auth/logout" && request.method === "GET") {
+      const logoutUrl = new URL(`${env.KINDE_DOMAIN}/logout`);
+      logoutUrl.searchParams.set("redirect", "https://alex.chat");
+      return new Response(null, {
+        status: 302,
+        headers: { ...cors, Location: logoutUrl.toString() },
+      });
+    }
+
     // ── POST /chat ───────────────────────────
     if (url.pathname === "/chat" && request.method === "POST") {
+      // ── Auth guard: require a valid Bearer token ──
+      const authHeader = request.headers.get("Authorization") ?? "";
+      if (!authHeader.startsWith("Bearer ")) {
+        return new Response(
+          JSON.stringify({ error: "unauthorized" }),
+          { status: 401, headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
+      const bearerToken = authHeader.slice(7).trim();
+      const tokenValid = await verifyJwt(bearerToken, env.KINDE_DOMAIN);
+      if (!tokenValid) {
+        return new Response(
+          JSON.stringify({ error: "invalid_token" }),
+          { status: 401, headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
+
       let body: ChatRequest;
       try {
         body = (await request.json()) as ChatRequest;
@@ -403,17 +633,11 @@ async function agenticLoop(
   }
 
   // ── 2. Optionally load Rube tools ────────────
-  //
-  // Two-level gate:
-  //   • RUBE_ENABLED env var  — server-side switch (flip via wrangler vars/secret, no redeploy)
-  //   • clientRubeEnabled     — per-request toggle sent by the client UI
-  //
   const rubeServerEnabled = env.RUBE_ENABLED === "true";
   const rubeMcpUrl = env.RUBE_MCP_URL ?? DEFAULT_RUBE_URL;
   const rubeToken = env.RUBE_API_TOKEN ?? "";
   const rubeActive = rubeServerEnabled && clientRubeEnabled && rubeToken !== "";
 
-  // Track which tool names belong to Rube so we can route tool calls correctly.
   const rubeToolNames = new Set<string>();
 
   if (rubeActive) {
@@ -438,7 +662,6 @@ async function agenticLoop(
   // ── 3. Build message array ───────────────────
   const messages: ChatMessage[] = [];
 
-  // Inject system prompt if none present
   if (!rawMessages.some((m) => m.role === "system")) {
     messages.push({
       role: "system",
@@ -451,10 +674,6 @@ async function agenticLoop(
 
   messages.push(...rawMessages);
 
-  // Typed helper – avoids repeating the cast at each call site.
-  // Workers AI binding types are strict about model names; using `any`
-  // here lets us pass a runtime string while keeping the rest of the
-  // file fully typed.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const runAI = (inputs: Record<string, unknown>): Promise<{
     response?: string;
@@ -467,15 +686,12 @@ async function agenticLoop(
 
   // ── 4. Agentic tool-calling loop ─────────────
   for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
-    // Run the model (non-streaming so we can inspect tool_calls)
     const aiResponse = await runAI({
       messages,
       ...(toolsArray.length > 0 && { tools: toolsArray }),
     });
 
-    // ── Tool calls? Execute them and continue ──
     if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
-      // Add assistant message that requested tool calls
       messages.push({
         role: "assistant",
         content: aiResponse.response ?? "",
@@ -500,10 +716,8 @@ async function agenticLoop(
               })()
             : tc.arguments;
 
-        // Emit tool_call event to client
         await writeSse(writer, "tool_call", { name: tc.name, arguments: args });
 
-        // Route execution: Rube tools → Rube MCP, everything else → Composio
         let resultStr: string;
         try {
           if (rubeToolNames.has(tc.name)) {
@@ -531,13 +745,11 @@ async function agenticLoop(
           resultParsed = resultStr;
         }
 
-        // Emit tool_result event to client
         await writeSse(writer, "tool_result", {
           name: tc.name,
           result: resultParsed,
         });
 
-        // Append tool result to message history
         messages.push({
           role: "tool",
           content: resultStr,
@@ -545,14 +757,12 @@ async function agenticLoop(
         });
       }
 
-      // Next iteration will see tool results and produce a reply
       continue;
     }
 
     // ── No more tool calls → stream final reply ──
     const finalText = aiResponse.response ?? "";
 
-    // Stream the final answer using Workers AI native streaming
     try {
       const stream = (await (env.AI as unknown as { run: (...a: unknown[]) => unknown }).run(
         model,
@@ -568,7 +778,6 @@ async function agenticLoop(
         if (done) break;
         buffer += dec.decode(value, { stream: true });
 
-        // SSE lines may be batched – process all complete events
         const parts = buffer.split("\n\n");
         buffer = parts.pop() ?? "";
 
@@ -589,7 +798,6 @@ async function agenticLoop(
         }
       }
     } catch {
-      // Fallback: emit the pre-fetched text word-by-word
       const words = finalText.split(/(\s+)/);
       for (const chunk of words) {
         if (chunk) await writeSse(writer, "token", { content: chunk });
@@ -601,7 +809,6 @@ async function agenticLoop(
     return;
   }
 
-  // Exceeded max iterations without a final text response
   await writeSse(writer, "error", {
     message: "Max tool iterations reached without a final response.",
   });

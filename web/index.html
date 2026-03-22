@@ -50,6 +50,60 @@
       overflow: hidden;
     }
 
+    /* ── Auth overlay ────────────────────────────────────────────── */
+    #auth-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      z-index: 100;
+    }
+    #auth-overlay.hidden { display: none; }
+
+    .auth-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 40px 48px;
+      text-align: center;
+      max-width: 360px;
+      width: 90%;
+    }
+    .auth-card .brand-icon-lg {
+      width: 56px; height: 56px;
+      background: var(--accent);
+      border-radius: var(--radius-md);
+      display: grid;
+      place-items: center;
+      font-size: 28px;
+      margin: 0 auto 20px;
+    }
+    .auth-card h1 { font-size: 1.4rem; margin-bottom: 8px; }
+    .auth-card p  { color: var(--text-dim); font-size: 0.88rem; line-height: 1.6; margin-bottom: 28px; }
+
+    .btn-signin {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 12px 28px;
+      border-radius: var(--radius-sm);
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: opacity 0.15s;
+      text-decoration: none;
+    }
+    .btn-signin:hover { opacity: 0.88; }
+
     /* ── Header ─────────────────────────────────────────────────── */
     header {
       display: flex;
@@ -435,6 +489,16 @@
 </head>
 <body>
 
+<!-- Auth overlay — shown when no token is present -->
+<div id="auth-overlay" class="hidden">
+  <div class="auth-card">
+    <div class="brand-icon-lg">💬</div>
+    <h1>Welcome to xchat</h1>
+    <p>Sign in to start chatting with an AI assistant powered by Cloudflare Workers AI.</p>
+    <a class="btn-signin" href="/auth/login">Sign in with Kinde</a>
+  </div>
+</div>
+
 <!-- Header -->
 <header>
   <div class="header-brand">
@@ -445,6 +509,7 @@
     <div id="status-dot" title="Worker connection status"></div>
     <button class="btn-ghost" onclick="clearChat()">Clear</button>
     <button class="btn-ghost" onclick="toggleSettings()">⚙ Settings</button>
+    <button class="btn-ghost" id="signout-btn" onclick="signOut()" title="Sign out" style="display:none;">Sign Out</button>
   </div>
 </header>
 
@@ -516,6 +581,85 @@
 </div>
 
 <script>
+// ── Auth ──────────────────────────────────────────────────────────────────────
+const AUTH_TOKEN_KEY = 'kinde_token';
+
+function getToken() {
+  return sessionStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function setToken(token) {
+  sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+function clearToken() {
+  sessionStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+function showAuthOverlay() {
+  document.getElementById('auth-overlay').classList.remove('hidden');
+  document.getElementById('signout-btn').style.display = 'none';
+}
+
+function hideAuthOverlay() {
+  document.getElementById('auth-overlay').classList.add('hidden');
+  document.getElementById('signout-btn').style.display = '';
+}
+
+function signOut() {
+  clearToken();
+  showAuthOverlay();
+  window.location.href = '/auth/logout';
+}
+
+/**
+ * Handle the OAuth callback: exchange the code for a token, store it,
+ * then redirect to the root so the chat UI loads clean.
+ */
+async function handleAuthCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code   = params.get('code');
+  const state  = params.get('state');
+  if (!code) { showAuthOverlay(); return; }
+
+  try {
+    const callbackUrl = new URL('/auth/callback', window.location.origin);
+    callbackUrl.searchParams.set('code', code);
+    if (state) callbackUrl.searchParams.set('state', state);
+
+    const resp = await fetch(callbackUrl.toString(), { credentials: 'include' });
+    if (!resp.ok) throw new Error(`Callback failed: HTTP ${resp.status}`);
+
+    const data = await resp.json();
+    if (!data.access_token) throw new Error('No access_token in response');
+
+    setToken(data.access_token);
+    // Redirect to root, stripping the callback params from the URL
+    window.location.replace('/');
+  } catch (err) {
+    console.error('Auth callback error:', err);
+    showAuthOverlay();
+  }
+}
+
+// ── Bootstrap auth on page load ───────────────────────────────────────────────
+(function initAuth() {
+  const path = window.location.pathname;
+
+  // If we're on the callback URL, handle the OAuth return
+  if (path === '/callback' || path.endsWith('/callback')) {
+    handleAuthCallback();
+    return;
+  }
+
+  // Otherwise check for a stored token
+  if (getToken()) {
+    hideAuthOverlay();
+  } else {
+    showAuthOverlay();
+  }
+})();
+
 // ── Config ────────────────────────────────────────────────────────────────────
 let config = {
   workerUrl:   localStorage.getItem('workerUrl')   || '',
@@ -612,9 +756,12 @@ async function sendMessage() {
   abortController = new AbortController();
 
   try {
+    const token = getToken();
+    const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
     const res = await fetch(config.workerUrl + '/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({
         messages:    messages.filter(m => m.role === 'user' || m.role === 'assistant'),
         userId:      config.userId,
@@ -624,6 +771,15 @@ async function sendMessage() {
       signal: abortController.signal,
     });
 
+    if (res.status === 401) {
+      // Token expired or invalid — clear it and show the sign-in screen
+      clearToken();
+      showAuthOverlay();
+      bubble.classList.remove('streaming');
+      bubble.textContent = 'Session expired. Please sign in again.';
+      setLoading(false);
+      return;
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const reader  = res.body.getReader();

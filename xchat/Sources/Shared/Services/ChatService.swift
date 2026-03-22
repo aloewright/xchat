@@ -62,10 +62,17 @@ actor ChatService {
         return AsyncThrowingStream { continuation in
             Task {
                 do {
+                    // Fetch the current access token from AuthService.
+                    // This is a non-blocking actor call; it returns nil when signed out.
+                    let accessToken = await AuthService.shared.currentToken()
+
                     var request = URLRequest(url: url)
                     request.httpMethod = "POST"
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    if let token = accessToken {
+                        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                    }
                     request.httpBody = try JSONEncoder().encode(body)
                     // Disable response caching for SSE
                     request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
@@ -76,6 +83,7 @@ actor ChatService {
                         throw ChatError.invalidResponse
                     }
                     guard (200...299).contains(http.statusCode) else {
+                        // Surface 401 distinctly so the caller can prompt re-authentication.
                         throw ChatError.httpError(http.statusCode)
                     }
 

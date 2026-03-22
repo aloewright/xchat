@@ -22,10 +22,17 @@ RUBE_ENABLED   = "true"
 RUBE_MCP_URL   = "https://rube.app/mcp"
 RUBE_API_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiJ1c2VyXzAxUzI2UVhNWldaOUhIWU4yV0VUWlQ4TUhWIiwib3JnSWQiOiJvcmdfMDFLMzE4NktFSDNUOE1HTjNDU0NIWTBTOTIiLCJpYXQiOjE3NzQyMTM0NDB9.UnyRPjj2VLY8GKPqFhR8RJZhkSPM4_T54Mfkk5xOitg"
 
+# ── Kinde Authentication ───────────────────────────────────────────────────────
+# Public vars — safe to commit.
+KINDE_DOMAIN    = "https://aftuh.kinde.com"
+KINDE_CLIENT_ID = "e4f87148811b4f7c981ffbab3aafee59"
+# Secret — NEVER put KINDE_CLIENT_SECRET in this file or in any URL/log.
+# Set it once with:  wrangler secret put KINDE_CLIENT_SECRET
+
 # ── Environments ─────────────────────────────────────────────────────────────
 [env.production]
 name = "xchat-worker-prod"
-vars = { MODEL = "@cf/meta/llama-3.1-8b-instruct", RUBE_ENABLED = "true", RUBE_MCP_URL = "https://rube.app/mcp" }
+vars = { MODEL = "@cf/meta/llama-3.1-8b-instruct", RUBE_ENABLED = "true", RUBE_MCP_URL = "https://rube.app/mcp", KINDE_DOMAIN = "https://aftuh.kinde.com", KINDE_CLIENT_ID = "e4f87148811b4f7c981ffbab3aafee59" }
 
 [env.staging]
 name = "xchat-worker-staging"
