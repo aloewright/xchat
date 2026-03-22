@@ -33,3 +33,8 @@ name = "xchat-worker-staging"
 # ── Local development ─────────────────────────────────────────────────────────
 # Create a .dev.vars file (git-ignored) with:
 #   COMPOSIO_API_KEY=your_key_here
+
+# ── Custom domain ─────────────────────────────────────────────────────────────
+[[routes]]
+pattern = "alex.chat/*"
+zone_name = "alex.chat"
