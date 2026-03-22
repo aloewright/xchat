@@ -1,0 +1,35 @@
+name = "xchat-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Workers AI binding ────────────────────────────────────────────────────────
+[ai]
+binding = "AI"
+
+# ── Environment variables (set secrets via `wrangler secret put`) ─────────────
+# Run: wrangler secret put COMPOSIO_API_KEY
+# Then add your key when prompted.
+
+[vars]
+MODEL = "@cf/meta/llama-3.1-8b-instruct"
+# CORS_ORIGIN = "https://your-frontend.pages.dev"   # uncomment to restrict CORS
+
+# ── Rube MCP ──────────────────────────────────────────────────────────────────
+# Toggle RUBE_ENABLED without redeploying: `wrangler secret put RUBE_ENABLED`
+# or just edit this value and redeploy.
+RUBE_ENABLED   = "true"
+RUBE_MCP_URL   = "https://rube.app/mcp"
+RUBE_API_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiJ1c2VyXzAxUzI2UVhNWldaOUhIWU4yV0VUWlQ4TUhWIiwib3JnSWQiOiJvcmdfMDFLMzE4NktFSDNUOE1HTjNDU0NIWTBTOTIiLCJpYXQiOjE3NzQyMTM0NDB9.UnyRPjj2VLY8GKPqFhR8RJZhkSPM4_T54Mfkk5xOitg"
+
+# ── Environments ─────────────────────────────────────────────────────────────
+[env.production]
+name = "xchat-worker-prod"
+vars = { MODEL = "@cf/meta/llama-3.1-8b-instruct", RUBE_ENABLED = "true", RUBE_MCP_URL = "https://rube.app/mcp" }
+
+[env.staging]
+name = "xchat-worker-staging"
+
+# ── Local development ─────────────────────────────────────────────────────────
+# Create a .dev.vars file (git-ignored) with:
+#   COMPOSIO_API_KEY=your_key_here

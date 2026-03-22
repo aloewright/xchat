@@ -1,0 +1,137 @@
+# project.yml – XcodeGen spec for xchat
+# Generate with: xcodegen generate
+# Install XcodeGen: brew install xcodegen
+
+name: xchat
+options:
+  bundleIdPrefix: com.xchat
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+    watchOS: "10.0"
+  xcodeVersion: "16.0"
+  groupSortPosition: top
+  createIntermediateGroups: true
+
+# ── Shared sources (used by all targets) ─────────────────────────────────────
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ENABLE_HARDENED_RUNTIME: YES
+
+# ── Targets ──────────────────────────────────────────────────────────────────
+targets:
+
+  # ── iOS ─────────────────────────────────────────────────────────────────────
+  xchat-iOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    info:
+      path: xchat/Resources/iOS-Info.plist
+      properties:
+        CFBundleDisplayName: xchat
+        UILaunchStoryboardName: LaunchScreen
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+    entitlements:
+      path: xchat/Resources/xchat-iOS.entitlements
+      properties:
+        com.apple.security.network.client: true
+    sources:
+      - path: xchat/Sources/Shared
+        excludes: []
+      - path: xchat/Sources/iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xchat.app
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  # ── macOS ────────────────────────────────────────────────────────────────────
+  xchat-macOS:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    info:
+      path: xchat/Resources/macOS-Info.plist
+      properties:
+        CFBundleDisplayName: xchat
+        NSPrincipalClass: NSApplication
+        LSUIElement: false
+    entitlements:
+      path: xchat/Resources/xchat-macOS.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+    sources:
+      - path: xchat/Sources/Shared
+      - path: xchat/Sources/macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xchat.app.mac
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  # ── watchOS ──────────────────────────────────────────────────────────────────
+  xchat-watchOS:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    info:
+      path: xchat/Resources/watchOS-Info.plist
+      properties:
+        CFBundleDisplayName: xchat
+        WKWatchOnly: true
+        WKApplication: true
+    entitlements:
+      path: xchat/Resources/xchat-watchOS.entitlements
+      properties:
+        com.apple.security.network.client: true
+    sources:
+      - path: xchat/Sources/Shared
+      - path: xchat/Sources/watchOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xchat.app.watch
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+# ── Schemes ───────────────────────────────────────────────────────────────────
+schemes:
+  xchat-iOS:
+    build:
+      targets:
+        xchat-iOS: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  xchat-macOS:
+    build:
+      targets:
+        xchat-macOS: all
+    run:
+      config: Debug
+
+  xchat-watchOS:
+    build:
+      targets:
+        xchat-watchOS: all
+    run:
+      config: Debug

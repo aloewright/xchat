@@ -1,0 +1,11 @@
+# Copy this file to .dev.vars and fill in your values
+# .dev.vars is git-ignored — never commit real secrets
+
+COMPOSIO_API_KEY=your_composio_api_key_here
+MODEL=@cf/meta/llama-3.1-8b-instruct
+# CORS_ORIGIN=http://localhost:8080
+
+# Rube MCP – set RUBE_ENABLED=false to disable without removing the token
+RUBE_ENABLED=true
+RUBE_MCP_URL=https://rube.app/mcp
+RUBE_API_TOKEN=your_rube_api_token_here

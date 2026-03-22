@@ -1,0 +1,21 @@
+{
+  "name": "xchat-worker",
+  "version": "1.0.0",
+  "description": "xchat Cloudflare Worker – AI chat backend with Composio tool use",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "type-check": "tsc --noEmit",
+    "build": "tsc --noEmit && echo 'Type check passed'"
+  },
+  "dependencies": {
+    "@composio/cloudflare": "^0.1.35",
+    "@composio/core": "^0.1.35"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250416.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.100.0"
+  }
+}

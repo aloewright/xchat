@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+worker/.wrangler/
+worker/dist/
+*.xcuserstate
+xchat.xcworkspace/xcuserdata/
+.env
+.dev.vars
