@@ -662,7 +662,7 @@ async function handleAuthCallback() {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 let config = {
-  workerUrl:   localStorage.getItem('workerUrl')   || '',
+  workerUrl:   localStorage.getItem('workerUrl') || window.location.origin,
   userId:      localStorage.getItem('userId')      || 'default',
   toolkits:    localStorage.getItem('toolkits')    || 'hackernews',
   rubeEnabled: localStorage.getItem('rubeEnabled') === 'true',
@@ -733,7 +733,7 @@ function sendSuggestion(btn) {
 async function sendMessage() {
   const text = $input.value.trim();
   if (!text || isLoading) return;
-  if (!config.workerUrl) { alert('Set the Worker URL in Settings first.'); toggleSettings(); return; }
+  
 
   $input.value = '';
   $input.style.height = 'auto';
@@ -985,7 +985,7 @@ function scrollToBottom() {
 // ── Connection health dot ─────────────────────────────────────────────────────
 async function updateStatusDot() {
   const dot = document.getElementById('status-dot');
-  if (!config.workerUrl) { dot.className = ''; return; }
+  
   if (isLoading) { dot.className = 'connected'; return; }
   try {
     const r = await fetch(config.workerUrl + '/health', { signal: AbortSignal.timeout(4000) });
@@ -996,7 +996,7 @@ async function updateStatusDot() {
 }
 
 // Check health on load and every 30s
-if (config.workerUrl) updateStatusDot();
+updateStatusDot();
 setInterval(updateStatusDot, 30_000);
 </script>
 </body>
