@@ -10,8 +10,8 @@
     "build": "tsc --noEmit && echo 'Type check passed'"
   },
   "dependencies": {
-    "@composio/cloudflare": "^0.1.35",
-    "@composio/core": "^0.1.35"
+    "@composio/cloudflare": "^0.8.1",
+    "@composio/core": "^0.8.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250416.0",
